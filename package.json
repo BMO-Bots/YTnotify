@@ -1,0 +1,19 @@
+{
+  "name": "youtube-discord-notifier",
+  "version": "1.0.0",
+  "description": "Bot Discord per notificare nuovi video YouTube con ruoli diversi in base alla durata",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test-config": "node test-config.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5"
+  },
+  "keywords": ["discord", "bot", "youtube", "notifier"],
+  "author": "Jesgran (https://jes.is-a.dev)",
+  "license": "MIT"
+}
