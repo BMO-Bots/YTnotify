@@ -1,8 +1,9 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fs = require('fs').promises;
+const path = require('path');
 require('dotenv').config();
 
-const
 const config = {
     token: process.env.DISCORD_TOKEN,
     channelId: process.env.DISCORD_CHANNEL_ID,
@@ -50,10 +51,31 @@ const client = new Client({
     ]
 });
 
-let lastVideoIds = {
-    [config.youtubeChannels[0]]: null,
-    [config.youtubeChannels[1]]: null
-};
+let lastVideoIds = {};
+const STORAGE_FILE = path.join(__dirname, 'lastVideos.json');
+
+// Funzione per caricare gli ultimi video IDs dal file
+async function loadLastVideoIds() {
+    try {
+        const data = await fs.readFile(STORAGE_FILE, 'utf8');
+        const stored = JSON.parse(data);
+        console.log('📁 Caricati ultimi video IDs dal file');
+        return stored;
+    } catch (error) {
+        console.log('📁 File lastVideos.json non trovato, inizializzo vuoto');
+        return {};
+    }
+}
+
+// Funzione per salvare gli ultimi video IDs nel file
+async function saveLastVideoIds() {
+    try {
+        await fs.writeFile(STORAGE_FILE, JSON.stringify(lastVideoIds, null, 2));
+        console.log('💾 Salvati ultimi video IDs nel file');
+    } catch (error) {
+        console.error('❌ Errore nel salvare lastVideos.json:', error);
+    }
+}
 
 function parseDuration(duration) {
     const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
@@ -223,21 +245,42 @@ async function checkForNewVideos() {
                 continue;
             }
             
-            if (!lastVideoIds[channelId] || lastVideoIds[channelId] !== latestVideo.id) {
+            // Controlla se questo video è già stato processato
+            if (lastVideoIds[channelId] !== latestVideo.id) {
+                // Solo se non è la prima esecuzione (abbiamo un video precedente salvato)
                 if (lastVideoIds[channelId]) {
+                    console.log(`🆕 Nuovo video rilevato! ${latestVideo.title}`);
                     await sendVideoNotification(latestVideo);
+                } else {
+                    console.log(`📹 Primo video rilevato per ${channelId}: ${latestVideo.title} (non invio notifica)`);
                 }
+                
+                // Aggiorna l'ID dell'ultimo video e salva
                 lastVideoIds[channelId] = latestVideo.id;
-                console.log(`📹 Ultimo video per ${channelId}: ${latestVideo.title}`);
+                await saveLastVideoIds();
+                console.log(`💾 Aggiornato ultimo video per ${channelId}: ${latestVideo.title}`);
+            } else {
+                console.log(`✅ Nessun nuovo video per ${channelId}`);
             }
         } catch (error) {
-            console.error(`Errore nel controllo canale ${channelId}:`, error);
+            console.error(`❌ Errore nel controllo canale ${channelId}:`, error);
         }
     }
 }
 
 client.once('ready', async () => {
     console.log(`🤖 Bot connesso come ${client.user.tag}!`);
+    
+    // Carica gli ultimi video IDs salvati
+    lastVideoIds = await loadLastVideoIds();
+    
+    // Inizializza i canali se non esistono nel file salvato
+    for (const channelId of config.youtubeChannels) {
+        if (!lastVideoIds[channelId]) {
+            lastVideoIds[channelId] = null;
+        }
+    }
+    
     await checkForNewVideos();
     setInterval(checkForNewVideos, 30 * 60 * 1000);
     console.log('⏰ Controllo automatico attivato (ogni 30 minuti)');
@@ -245,6 +288,7 @@ client.once('ready', async () => {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    
     if (message.content === '!test123') {
         try {
             await message.reply('🧪 Esecuzione test in corso...');
@@ -261,6 +305,42 @@ client.on('messageCreate', async (message) => {
         } catch (error) {
             console.error('Errore nel comando test:', error);
             await message.reply('❌ Errore durante l\'esecuzione del test.');
+        }
+    }
+    
+    if (message.content === '!reset') {
+        try {
+            lastVideoIds = {};
+            for (const channelId of config.youtubeChannels) {
+                lastVideoIds[channelId] = null;
+            }
+            await saveLastVideoIds();
+            await message.reply('🔄 Cache dei video resettata! Il prossimo controllo rileverà i video attuali come nuovi.');
+            console.log('🔄 Cache video resettata manualmente');
+        } catch (error) {
+            console.error('Errore nel comando reset:', error);
+            await message.reply('❌ Errore durante il reset della cache.');
+        }
+    }
+    
+    if (message.content === '!status') {
+        try {
+            let statusMessage = '📊 **Status Bot YouTube Notifier**\n\n';
+            for (const channelId of config.youtubeChannels) {
+                const latestVideo = await getLatestVideo(channelId);
+                if (latestVideo) {
+                    statusMessage += `🎬 **${latestVideo.channelTitle}**\n`;
+                    statusMessage += `Ultimo video: ${latestVideo.title}\n`;
+                    statusMessage += `ID salvato: ${lastVideoIds[channelId] || 'Nessuno'}\n`;
+                    statusMessage += `Nuovo video?: ${lastVideoIds[channelId] !== latestVideo.id ? '✅ Sì' : '❌ No'}\n\n`;
+                } else {
+                    statusMessage += `❌ Errore nel recupero info per canale ${channelId}\n\n`;
+                }
+            }
+            await message.reply(statusMessage);
+        } catch (error) {
+            console.error('Errore nel comando status:', error);
+            await message.reply('❌ Errore durante il controllo dello status.');
         }
     }
 });
